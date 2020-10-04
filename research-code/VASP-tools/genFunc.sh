@@ -1,23 +1,135 @@
-#!/bin/bash
+interfaceSeparationMod() {
+
+    python3.7 - "$*" <<-END
+
+    import numpy as np
+    from sys import argv
+
+    h, d = [float(i) for i in argv[1].split()]
+
+    with open('POSCAR', 'r') as f, open('newPOS', 'w') as g:
+
+        for _ in range(2):
+            g.write(f.readline().lstrip())
+
+        M = np.matrix([[float(col) for col in row.split()]
+                    for row in [f.readline() for i in range(3)]])
+        N = M.copy()
+
+        N[2, 2] += 2 * d
+
+        g.write('\n'.join('\t' + '\t'.join('%21.16f' % col for col in row)
+                        for row in N.A) + '\n')
+
+        for _ in range(4):
+            g.write(f.readline().lstrip())
+
+        h *= M[2, 2]
+        for line in f.readlines():
+            args = line.split()
+            if len(args) > 0:
+                z = float(args[2]) * M[2, 2]
+                args[2] = str(round((z + d if z > h else z) / N[2, 2], 16))
+                g.write('\t'.join(args) + '\n')
+            else:
+                break
+
+END
+
+}
+scaleLattice() {
+
+    python3.7 - $* <<-END
+
+    from sys import argv
+    import numpy as np
+
+    sca = np.array([float(i) for i in argv[2:]])
+    s = int(argv[1])
+
+    with open('tempPOS', 'r') as f, open('scaPOS', 'w') as g:
+
+        for _ in range(2):
+            g.write(f.readline())
+
+        M = np.matrix([[float(col) for col in row.split()]
+                    for row in [f.readline() for i in range(3)]])
+        T = np.matrix(np.identity(3) * (1 + s * sca))
+
+        g.write('\n'.join('\t'.join('%0.9f' % col for col in row)
+                        for row in (T.T * M).A) + '\n')
+
+        for line in f.readlines():
+            g.write(line)
+
+END
+
+    mv scaPOS POSCAR
+
+}
+
+rotateCell() {
+
+    cp POSCAR origPOS
+
+    python3.7 - "$*" <<-END
+
+    from sys import argv
+    import numpy as np
+
+    vals = [float(i) for i in argv[1].split()]
+
+    with open('POSCAR', 'r') as f, open('rotPOS', 'w') as g:
+
+        for _ in range(2):
+            g.write(f.readline())
+
+        M = np.matrix([[float(col) for col in row.split()]
+                    for row in [f.readline() for i in range(3)]])
+        R = np.matrix([vals[:3], vals[3:6], vals[6:]])
+        Mp = (M * R).T
+
+        g.write('\n'.join('\t'.join('%0.9f' % col for col in row)
+                        for row in Mp.A) + '\n')
+
+        for _ in range(3):
+            g.write(f.readline())
+
+        newCoords = np.matrix([[float(col) for col in row.split()[:-1]]
+                            for row in f.readlines()]) * R
+
+        g.write('\n'.join('\t'.join('%0.9f' % (col + 1 if col < 0 else col)
+                                    for col in row) for row in newCoords.A))
+
+END
+
+    mv rotPOS POSCAR
+}
+
+chgDiff() {
+    /work/01293/hudamn/Edan/files/extra/chgdiff.py CHGCAR $*
+}
 
 sigCheck() {
     grep sigma OUTCAR | grep -o =.* | awk -v n=$(storePos i) '{print ($2 - $5)/n}'
 }
 
 compE() {
-    for i in old/status status; do
+    local i
+    for i in */status status; do
         echo -n "$i -> "
         grep E0 $i | tail -1 | getNumber | head -2 | tail -1
     done
 }
 
 getE() {
-    local loc
+    local loc i
     if [[ $1 ]]; then loc=$*; else loc=.; fi
     for i in $loc; do grep E0 $i/status | tail -1 | getNumber | head -2 | tail -1; done | sort -nr
 }
 
 getAngle() {
+    local mags mat a b c
     mags=($(getLat disp))
     mat=($(getLat pass))
     a=${mat[*]:0:3}
@@ -33,7 +145,9 @@ getAngle() {
 
 trig() {
     awk -v CONVFMT=%.16f -v t=$1 -v x=$2 'BEGIN \
-    { if (t == "acos") printf atan2((1.-x^2)^0.5,x) }'
+  { \
+    if (t == "acos") printf atan2((1.-x^2)^0.5,x); \
+  }'
 }
 
 dot() {
@@ -45,7 +159,7 @@ dot() {
 
 originalSlab() {
     if [[ $1 ]]; then
-        mkdir -p $(dirname $(find $1/output/init/ -name POSCAR | head -1))/unrelaxed && mv POSCAR $_
+        mkdir -p $(dirname $(find $1/output/init/ -name POSCAR | head -1))/unrelaxed && cp POSCAR $_
     else
         echo -e "\nmissing directory\n"
     fi
@@ -75,8 +189,9 @@ slabAnalysis() {
     s=($(storePos s))
     n=($(storePos n))
     v=($(storePos v))
-    #echo -n "Formula unit (${s[*]}) -> "; read -a a
-    a=(1 1 2 8)
+    echo -n "Formula unit (${s[*]}) -> "
+    read -a a
+    #a=(1 1 2 8) # formula unit
     echo -n "Sort by ( $(FC 2 0): layer | 1: element ) -> "
     read st
     set ${st:=0}
@@ -114,8 +229,8 @@ slabAnalysis() {
         fi
     }
 
-    paste inPOS currPOS atomList | \
-    awk -v z=$(dot "$(getLat pass | cut -d ' ' -f 7-9)" "0 0 1") -v mat="$(getLat pass)" -v t=.5 -v vac=20 \
+    paste inPOS currPOS atomList |
+        awk -v z=$(dot "$(getLat pass | cut -d ' ' -f 7-9)" "0 0 1") -v mat="$(getLat pass)" -v t=.5 -v vac=20 \
     '{ \
         split(mat,m); h = $6*z; \
         da = $4-$1; db = $5-$2; dc = $6-$3; \
@@ -167,7 +282,7 @@ slabAnalysis() {
     fi
 
     title
-    cat slabAnalysis | sort -nr -k1,1 -k2,2 | sed 's/^  *\w*//' | sed "s/\t//" | tac | eval "sed '$exp'" | clip e 1 | awk '{print $9, $1, $7, $12}'
+    cat slabAnalysis | sort -nr -k1,1 -k2,2 | sed 's/^  *\w*//' | sed "s/\t//" | tac | eval "sed '$exp'" | clip e 1 #| awk '{print $9, $1, $7, $12}'
     title
 
     rm inPOS currPOS atomList vTemp bTemp sTemp baderAnalysis slabAnalysis 2>/dev/null
@@ -240,7 +355,8 @@ getCoords() {
             let n+=$i
         done
     fi
-    grep -EA $n '(Direct|Cartesian)' POSCAR | tail -n +2 | rmSpace | if [[ $1 ]]; then cut -d ' ' -f 1-3; else cut -d ' ' -f 1-; fi
+    grep -EA $n '((d|D)irect|(c|C)artesian)' POSCAR | tail -n +2 | rmSpace |
+        if [[ $1 ]]; then cut -d ' ' -f 1-3; else cut -d ' ' -f 1-; fi
 }
 
 scaleVac() {
@@ -257,23 +373,34 @@ scaleVac() {
 
     python3.7 - $inc <<-END
 
-        import numpy as np
-        from sys import argv
-        from pymatgen.core import structure, Lattice
-        from pymatgen.io.vasp.inputs import Poscar
+    import numpy as np
+    from sys import argv
+    from pymatgen.core import structure, Lattice
+    from pymatgen.io.vasp.inputs import Poscar
 
-        vac = float(argv[1])
+    vac = float(argv[1])
 
-        slab_in = structure.Structure.from_file('POSCAR')
-        lat = slab_in.as_dict().get('lattice')
+    slab_in = structure.Structure.from_file('POSCAR')
+    lat = slab_in.as_dict().get('lattice')
 
-        lat = Lattice.from_parameters(lat.get('a'), lat.get('b'), lat.get('c'),
-              lat.get('alpha'), lat.get('beta'), lat.get('gamma'), vesta=True)
+    lat = Lattice.from_parameters(lat.get('a'),
+                                  lat.get('b'),
+                                  lat.get('c'),
+                                  lat.get('alpha'),
+                                  lat.get('beta'),
+                                  lat.get('gamma'),
+                                  vesta=True)
 
-        lat = Lattice.from_parameters(lat.a, lat.b, lat.c + vac / lat.matrix[2,2] * lat.c,
-              lat.alpha, lat.beta, lat.gamma, vesta=True)
+    lat = Lattice.from_parameters(lat.a,
+                                  lat.b,
+                                  lat.c + vac / lat.matrix[2, 2] * lat.c,
+                                  lat.alpha,
+                                  lat.beta,
+                                  lat.gamma,
+                                  vesta=True)
 
-        with open('scaledPos', 'a') as f: f.write(np.array2string(lat.matrix) + "\n")
+    with open('scaledPos', 'a') as f:
+        f.write(np.array2string(lat.matrix) + "\n")
 
 END
 
@@ -289,8 +416,8 @@ END
     # scale z-axis coordinates to fit scaled cell
     x=0
     for i in ${!s[*]}; do
-        getCoords | head -$((n[i] + x)) | tail -${n[$i]} | \
-        awk -v co=$(printf %0.3f $co) -v cn=$(printf %0.3f $cn) \
+        getCoords | head -$((n[i] + x)) | tail -${n[$i]} |
+            awk -v co=$(printf %0.3f $co) -v cn=$(printf %0.3f $cn) \
         -v h=$(echo "scale=16; $co / $cn" | bc) -v o=$1 -v vac=20 -v CONVFMT=%.16f \
         '{$3 * co > co - vac/2 ? $3=$3*h + (cn - co)/cn : $3=$3*h}1' >${s[$i]}_temp
         let x+=${n[$i]}
@@ -348,14 +475,24 @@ scaleSlab() {
     slab_in = structure.Structure.from_file('POSCAR')
     lattice = slab_in.as_dict().get('lattice')
 
-    old_lattice = Lattice.from_parameters(lattice.get('a'), lattice.get('b'), lattice.get('c'),
-                                          lattice.get('alpha'), lattice.get('beta'), lattice.get('gamma'), vesta=True)
+    old_lattice = Lattice.from_parameters(lattice.get('a'),
+                                          lattice.get('b'),
+                                          lattice.get('c'),
+                                          lattice.get('alpha'),
+                                          lattice.get('beta'),
+                                          lattice.get('gamma'),
+                                          vesta=True)
 
-    new_lattice = Lattice.from_parameters(old_lattice.a, old_lattice.b, old_lattice.c + (h * (ln - lo)),
-                                          old_lattice.alpha, old_lattice.beta, old_lattice.gamma, vesta=True)
+    new_lattice = Lattice.from_parameters(old_lattice.a,
+                                          old_lattice.b,
+                                          old_lattice.c + (h * (ln - lo)),
+                                          old_lattice.alpha,
+                                          old_lattice.beta,
+                                          old_lattice.gamma,
+                                          vesta=True)
 
     with open('scaledPos', 'a') as f:
-      f.write(np.array2string(new_lattice.matrix) + "\n")
+        f.write(np.array2string(new_lattice.matrix) + "\n")
 
 END
 
@@ -463,21 +600,28 @@ SD() {
 
     with open('POSCAR', 'r') as f, open('SD', 'w') as g:
 
-      for line in range(5):
+        for line in range(5):
+            g.write(f.readline())
+
+        atoms = f.readline()
+        g.write(atoms)
+        atoms = atoms.split()
+        nums = f.readline()
+        g.write(nums)
+        nums = nums.split()
+        g.write('SD\n')
         g.write(f.readline())
 
-      atoms = f.readline(); g.write(atoms); atoms = atoms.split()
-      nums = f.readline(); g.write(nums); nums = nums.split()
-      g.write('SD\n')
-      g.write(f.readline())
+        for s in range(len(nums)):
 
-      for s in range(len(nums)):
+            lines = [[float(value) for value in f.readline().split()]
+                    for line in range(int(nums[s]))]
 
-        lines = [[float(value) for value in f.readline().split()] for line in range(int(nums[s]))]
-
-        for line in sorted(lines, key=lambda line: line[axis]):
-          SD = ' F F F' if low1 * l < line[axis] < high1 * l or low2 * l < line[axis] < high2 * l else ' T T T'
-          g.write('%18.9f %18.9f %18.9f' % tuple(line) + SD + ' \n')
+            for line in sorted(lines, key=lambda line: line[axis]):
+                SD = ' F F F' if low1 * l < line[
+                    axis] < high1 * l or low2 * l < line[
+                        axis] < high2 * l else ' T T T'
+                g.write('%18.9f %18.9f %18.9f' % tuple(line) + SD + ' \n')
 
 END
 
@@ -512,9 +656,9 @@ bandDecomp() {
                 echo -e "\nFailed to create necessary folders\n"
                 return
             fi
-            cp POSCAR POTCAR KPOINTS WAVECAR CHG* job $path
+            cp POSCAR POTCAR KPOINTS WAVECAR job $path
             sed -i "s/\(\-J\).*/\1 $name/" $path/job
-            echo -e "mv PARCHG ../$name.vasp; rm CHG* WAVECAR" >>$path/job
+            echo -e "mv PARCHG ../$name.vasp; rm WAVECAR" >>$path/job
             echo -n "Enter range type ( 0: energy | 1: bands ) -> "
             read rType
             set ${rType:=0}
@@ -627,34 +771,35 @@ getChgDen() {
         if [[ $(grep PAW_PBE POTCAR) ]]; then paw=2; else paw=0; fi
         queue 1
         cp INCAR charge
-        cp job charge/tempJOB
-        cat POSCAR | if [[ $(head -8 POSCAR | grep '^[Ss]') ]]; then sed 8d; fi | head -$((nIon + 8)) >charge/tempPOS
         cp SCF_KPOINTS charge/KPOINTS
+        cp job charge/tempJOB
+        cat POSCAR >charge/tempPOS
         cd charge
+        if [[ $(head -8 tempPOS | grep '^[Ss]') ]]; then sed -i 8d tempPOS; fi
+        head -$((nIon + 8)) tempPOS >POSCAR
         setTag 'ISTART ICHARG' '0 2'
 
         j=1
         for i in ${!s[*]}; do
             mkdir -p ${s[$i]}
             pos=$((8 + j))
-            sed -n "$pos,$((pos + ${n[$i]} - 1))p;1,8p" tempPOS >${s[$i]}/POSCAR
+            sed -n "$pos,$((pos + ${n[$i]} - 1))p;1,8p" POSCAR >${s[$i]}/POSCAR
             sed -i -e "6s/.*/   ${s[$i]}/" -e "7s/.*/   ${n[$i]}/" ${s[$i]}/POSCAR
             cp tempJOB ${s[$i]}/job
-            echo -en "\nc=(\$(grep : OSZICAR | rmSpace | tail -1 | cut -d ' ' -f 4,5 | " >>${s[$i]}/job
+            echo -e "\ne=-3" >>${s[$i]}/job
+            echo -en "c=(\$(grep : OSZICAR | rmSpace | tail -1 | cut -d ' ' -f 4,5 | " >>${s[$i]}/job
             echo "grep -o E... | sed 's/0//' | getNumber | xargs))" >>${s[$i]}/job
-            #echo -e "c0=\$(getTag EDIFF | getNumber | tail -1 | sed 's/0//')" >> ${s[$i]}/job
-            #echo -e "if (( \${c[0]} <= \$c0 )) && (( \${c[1]} <= \$c0 )); then" >> ${s[$i]}/job
-            echo -e "if (( \${c[0]} <= -6 )) && (( \${c[1]} <= -6 )); then" >>${s[$i]}/job
+            echo -e "if (( \${c[0]} <= \$e )) && (( \${c[1]} <= \$e )); then" >>${s[$i]}/job
             echo -e "  mv CHGCAR ../${s[$i]}.vasp; rm CHG*" >>${s[$i]}/job
             echo -e "fi" >>${s[$i]}/job
             sed -i -e "s/\(setTag LWAVE\) .*/\1 F/" -e "s/\(setTag LCHARG\) .*/\1 T/" ${s[$i]}/job
             potGen $paw ${s[$i]}
             cp INCAR POTCAR KPOINTS ${s[$i]}
-            sbatch -D ${s[$i]} ${s[$i]}/job
+            if [[ $1 ]]; then sbatch -D ${s[$i]} ${s[$i]}/job; fi
             j=$((j + ${n[$i]}))
         done
 
-        rm INCAR POTCAR KPOINTS tempJOB tempPOS
+        rm INCAR POTCAR KPOINTS tempJOB tempPOS POSCAR
         cd ../
     fi
 }
@@ -702,10 +847,8 @@ occCheck() {
             patC='0.000000 0.000000'
         fi
         n=$(head -6 EIGENVAL | tail -1 | rmSpace | cut -d ' ' -f 2)
-        if
-            [[ $(grep " $vbm " EIGENVAL | rmSpace | grep "$patV" | wc -l) == $n ]] && \
-            [[ $(grep " $((vbm + 1)) " EIGENVAL | rmSpace | grep "$patC" | wc -l) == $n ]]
-        then echo ''; else echo '*'; fi
+        if [[ $(grep " $vbm " EIGENVAL | rmSpace | grep "$patV" | wc -l) == $n ]] &&
+            [[ $(grep " $((vbm + 1)) " EIGENVAL | rmSpace | grep "$patC" | wc -l) == $n ]]; then echo ''; else echo '*'; fi
     else
         grep -C 1 " $vbm " EIGENVAL
     fi
@@ -758,25 +901,26 @@ math() {
         echo -e "\nEmpty argument list\n"
     else
         python3.7 - $1 "${@:2}" <<-END
+
         from sys import argv
         import numpy as np
 
         if argv[1] == 'avg':
-          print(round(np.average([float(i) for i in argv[2:]]), 3))
+            print(round(np.average([float(i) for i in argv[2:]]), 3))
         elif argv[1] == 'sum':
-          print(round(np.sum([float(i) for i in argv[2:]]), 3))
+            print(round(np.sum([float(i) for i in argv[2:]]), 3))
         elif argv[1] == 'min':
-          print(round(np.min([float(i) for i in argv[2:]]), 3))
+            print(round(np.min([float(i) for i in argv[2:]]), 3))
         elif argv[1] == 'max':
-          print(round(np.max([float(i) for i in argv[2:]]), 3))
+            print(round(np.max([float(i) for i in argv[2:]]), 3))
         elif argv[1] == 'ceil':
-          print(int(np.ceil([float(i) for i in argv[2:]])[0]))
+            print(int(np.ceil([float(i) for i in argv[2:]])[0]))
         elif argv[1] == 'floor':
-          print(int(np.floor([float(i) for i in argv[2:]])[0]))
+            print(int(np.floor([float(i) for i in argv[2:]])[0]))
         elif argv[1] == 'triProd':
-          v = [np.array([float(j) for j in argv[2+i:5+i]]) for i in (0, 3, 6)]
-          if len(v) == 3:
-            print(np.dot(v[0], np.cross(v[1], v[2])))
+            v = [np.array([float(j) for j in argv[2+i:5+i]]) for i in (0, 3, 6)]
+            if len(v) == 3:
+                print(np.dot(v[0], np.cross(v[1], v[2])))
 END
     fi
 
@@ -804,49 +948,16 @@ oxyCore() {
 
 goto() {
     local dir
-    echo -ne "\nSelect directory: \n\n"
-    #echo -ne "1: 100\n2: 010\n3: 001\n"
-    echo -ne "4: 110\n"
-    #echo -ne "5: -110\n6: 101\n7: -101\n8: 011\n9: 0-11\n10: 111\n"
-    echo -ne "11: -111\n12: 1-11\n"
-    #echo -ne "13: 11-1\n\n"
-    echo -ne "14: 201\n15: -201\n16: 021\n17: 0-21\n18: 112\n"
-    #echo -ne "19: 11-2\n"
-    echo -ne "20: 203\n21: 023\n"
-    echo -ne "\n22: g-Cu-O-ad\n"
-    echo -ne "\n23: BTO-SBTO\n"
-    echo -ne "\n-> "
-    read dir
+    #echo -ne "\nSelect directory: \n\n"
+    #echo -ne "\n-> "
+    #read dir
 
     home=/work/01293/hudamn/stampede2/EDAN
 
     case $dir in
-    1) cd $home/CBTO/slabs/1/100/1x1 ;;
-    2) cd $home/CBTO/slabs/1/010/1x1 ;;
-    3) cd $home/CBTO/slabs/1/001/1x1 ;;
-    4) cd $home/CBTO/slabs/1/110/1x1/O*/relaxed/11 ;;
-    5) cd $home/CBTO/slabs/1/_110/1x1 ;;
-    6) cd $home/CBTO/slabs/1/101/1x1 ;;
-    7) cd $home/CBTO/slabs/1/_101/1x1 ;;
-    8) cd $home/CBTO/slabs/1/011/1x1 ;;
-    9) cd $home/CBTO/slabs/1/0_11/1x1 ;;
-    10) cd $home/CBTO/slabs/1/111/1x1 ;;
-    11) cd $home/CBTO/slabs/1/_111/1x1/O*/relaxed/13 ;;
-    12) cd $home/CBTO/slabs/1/1_11/1x1/O*/relaxed/11 ;;
-    13) cd $home/CBTO/slabs/1/11_1/1x1 ;;
-    14) cd $home/CBTO/slabs/2/201/1x1/O*/relaxed/11 ;;
-    15) cd $home/CBTO/slabs/2/_201/1x1/O*/relaxed/19 ;;
-    16) cd $home/CBTO/slabs/2/021/1x1/O*/relaxed/11 ;;
-    17) cd $home/CBTO/slabs/2/0_21/1x1/O*/relaxed/19 ;;
-    18) cd $home/CBTO/slabs/2/112/1x1/O*/relaxed/11 ;;
-    19) cd $home/CBTO/slabs/2/11_2/1x1 ;;
-    20) cd $home/CBTO/slabs/3/203/1x1/O*/relaxed/17 ;;
-    21) cd $home/CBTO/slabs/3/023/1x1/O*/relaxed/19 ;;
-    22) cd $home/g-Cu-O-ad/slab ;;
-    23) cd $home/interfaces/BTO-SBTO ;;
     *) cd $home ;;
     esac
-    echo ''
+    #echo ''
 }
 
 makeSuper() {
@@ -855,6 +966,7 @@ makeSuper() {
     else
         cp POSCAR unitCell
         python3.7 - $* <<-END
+
         from sys import argv
         from pymatgen.core.structure import Structure
         from pymatgen.io.vasp.inputs import Poscar
@@ -863,6 +975,7 @@ makeSuper() {
         st.make_supercell(argv[1:])
 
         Poscar(st).write_file('POSCAR')
+
 END
     fi
 }
@@ -894,12 +1007,12 @@ highSymK() {
 
 dispFunc() { # display all available user-defined functions
     echo ""
-    grep '^  [A-Za-z][A-Za-z]*()' /work/01293/hudamn/Edan/genFunc
+    grep '^  [A-Za-z][A-Za-z]* ()' /work/01293/hudamn/Edan/genFunc
     echo ""
 }
 
 rmSpace() { # removes extra whitespace including tabs
-    sed -e 's/  */ /g' -e "s/\t/ /g" -e 's/^ //'
+    sed -e "s/\t/ /g" -e 's/  */ /g' -e 's/^ //'
 }
 
 joinStr() { # Usage: joinStr <delimiter> <args>
@@ -944,6 +1057,7 @@ getPrimitive() {
         cp POSCAR fullPOS
 
         python3.7 <<-END
+
         from pymatgen.core.structure import Structure
         from pymatgen.symmetry.analyzer import SpacegroupAnalyzer as sga
         from pymatgen.io.vasp.inputs import Poscar
@@ -953,7 +1067,6 @@ getPrimitive() {
         Poscar(sga(st).get_primitive_standard_structure(international_monoclinic=False)).write_file('POSCAR')
 
 END
-
         echo ""
         cat POSCAR
         echo -e "\n -> written to POSCAR...\n"
@@ -998,8 +1111,8 @@ kList() { # Usage: kList <dir>
         return
     else folder=$1; fi
     file=$(find *.xml)
-    sed -n '/kpointlist/,/weights/p' $folder/$file | grep '<v>' | \
-    rmSpace | cut -d ' ' -f 2-4 | xargs printf "%0.6f %0.6f %0.6f\n" >kList
+    sed -n '/kpointlist/,/weights/p' $folder/$file | grep '<v>' |
+        rmSpace | cut -d ' ' -f 2-4 | xargs printf "%0.6f %0.6f %0.6f\n" >kList
     duplicateLines kList
 }
 
@@ -1014,36 +1127,31 @@ bandEdges() { # obtain band edges for selected spin (provide any argument to pri
     vbm=($(vbm eV))
     cbm=($(vbm eC))
 
-    if [ $1 ]; then s=$1; else
-        echo -ne "\nSpin ( 1-up | 2-down ) -> "
-        read s
+    echo -ne "\nSpin ( 1-up | 2-down ) -> "
+    read s
+
+    if [[ $s =~ ^[12]$ ]]; then
+        eV=${vbm[$((s - 1))]}
+        kV=$(tail -n +8 EIGENVAL | rmSpace | grep -B $vbmI "$vbmI $(if ((s == 2)); then echo ".* "; fi)$eV" |
+            head -1 | cut -d ' ' -f 1-3 | xargs printf "%0.6f ")
+        kV=$(for i in $(echo $kV | cut -d ' ' -f 1-); do if [[ $i == -0.000000 ]]; then
+            echo -n '0.000000 '
+        else echo -n "$i "; fi; done)
+        kVn=$(grep -n -- "^$(echo $kV)" kList | cut -d ':' -f 1 | head -1)
+        eC=${cbm[$((s - 1))]}
+        kC=$(tail -n +8 EIGENVAL | rmSpace | grep -B $cbmI "$cbmI $(if ((s == 2)); then echo ".* "; fi)$eC" |
+            head -1 | cut -d ' ' -f 1-3 | xargs printf "%0.6f ")
+        kCn=$(grep -n -- "^$(echo $kC)" kList | cut -d ':' -f 1 | head -1)
+        if ((s == 1)); then echo -e "Spin Up\n"; else echo -e "Spin Down\n"; fi
+        printf "  VBM: %0.3f eV @ %d [ %s]\n" $eV $kVn "$kV"
+        printf "  CBM: %0.3f eV @ %d [ %s]\n" $eC $kCn "$kC"
+        printf "  Gap: %0.3f eV\n" $(echo $eC - $eV | bc)
+        echo ""
+    else
+        echo -e "\nBad spin value\n"
     fi
-    if [[ ! $s =~ ^[12]$ ]]; then s=1; fi
-    echo ''
 
-    eV=${vbm[$((s - 1))]}
-    kV=$(
-        tail -n +8 EIGENVAL | rmSpace | grep -B $vbmI "$vbmI $(if ((s == 2)); then echo ".* "; fi)$eV" | \
-        head -1 | cut -d ' ' -f 1-3 | xargs printf "%0.6f "
-    )
-    kV=$(for i in $(echo $kV | cut -d ' ' -f 1-); do if [[ $i == -0.000000 ]]; then
-        \
-        echo -n '0.000000 '
-    else echo -n "$i "; fi; done)
-    kVn=$(grep -n -- "^$(echo $kV)" kList | cut -d ':' -f 1 | head -1)
-    eC=${cbm[$((s - 1))]}
-    kC=$(
-        tail -n +8 EIGENVAL | rmSpace | grep -B $cbmI "$cbmI $(if ((s == 2)); then echo ".* "; fi)$eC" | \
-        head -1 | cut -d ' ' -f 1-3 | xargs printf "%0.6f "
-    )
-    kCn=$(grep -n -- "^$(echo $kC)" kList | cut -d ':' -f 1 | head -1)
-    if ((s == 1)); then echo -e "Spin Up\n"; else echo -e "Spin Down\n"; fi
-    printf "  VBM: %0.3f eV @ %d [ %s]\n" $eV $kVn "$kV"
-    printf "  CBM: %0.3f eV @ %d [ %s]\n" $eC $kCn "$kC"
-    printf "  Gap: %0.3f eV\n" $(echo $eC - $eV | bc)
-    echo ""
-
-    rm kList
+    if [[ ! $1 ]]; then rm kList; fi
 }
 
 emc() {
@@ -1096,7 +1204,7 @@ genK() {
         echo -e "\nInvalid selection\n"
         genK
     fi
-    bandEdges
+    bandEdges 1
     echo -n "k-point index -> "
     read k
     if [[ $k =~ ^[0-9]+$ ]]; then
@@ -1129,39 +1237,49 @@ genK() {
     fi
 
     mkdir -p $c
-    cp ../../{INCAR,POTCAR,CHGCAR,POSCAR,job} $c
+    cp ../../../{INCAR,POTCAR,CHGCAR,POSCAR,job} $c
 
     python3.7 - "${kb[*]}" "${kc[*]}" "${kf[*]}" $step $n $c <<-END
-        import numpy as np
-        from numpy import pi,dot,array
-        from numpy.linalg import norm,inv
-        from sys import argv
-        from pymatgen.core.structure import Structure as st
 
-        rec = st.from_file(argv[6]+'/POSCAR').lattice.reciprocal_lattice
-        kb, kc, kf = [rec.get_cartesian_coords(i) if len(i) > 1 else "0"
-                      for i in [array([float(j) for j in k.split()]) if len(k) > 1 else "0" for k in argv[1:4]]]
+    import numpy as np
+    from numpy import pi, dot, array
+    from numpy.linalg import norm, inv
+    from sys import argv
+    from pymatgen.core.structure import Structure as st
 
-        # define unit vectors
-        if len(kb) > 1: ub = (kb-kc)/norm(kb-kc)
-        if len(kf) > 1: uf = (kf-kc)/norm(kf-kc)
+    rec = st.from_file(argv[6] + '/POSCAR').lattice.reciprocal_lattice
+    kb, kc, kf = [
+        rec.get_cartesian_coords(i) if len(i) > 1 else "0" for i in [
+            array([float(j) for j in k.split()]) if len(k) > 1 else "0"
+            for k in argv[1:4]
+        ]
+    ]
 
-        k = []
+    # define unit vectors
+    if len(kb) > 1: ub = (kb - kc) / norm(kb - kc)
+    if len(kf) > 1: uf = (kf - kc) / norm(kf - kc)
 
-        if len(kb) > 1:
-          for i in range(int(argv[5])): k.append(rec.get_fractional_coords(kc + ub*(i+1)*float(argv[4])))
-                k.reverse()
+    k = []
 
-        k.append(rec.get_fractional_coords(kc))
+    if len(kb) > 1:
+        for i in range(int(argv[5])):
+            k.append(rec.get_fractional_coords(kc + ub * (i + 1) * float(argv[4])))
+        k.reverse()
 
-        if len(kf) > 1:
-          for i in range(int(argv[5])): k.append(rec.get_fractional_coords(kc + uf*(i+1)*float(argv[4])))
+    k.append(rec.get_fractional_coords(kc))
 
-        with open('kTest.txt','w') as f:
-          f.write("Step size = {0:0.3f} 2pi/A\n{1:d}\nrec\n".format(float(argv[4]),len(k)))
-          for i in k: f.write(" {0:11.8f} {1:11.8f} {2:11.8f}  0.01\n".format(i[0],i[1],i[2]))
+    if len(kf) > 1:
+        for i in range(int(argv[5])):
+            k.append(rec.get_fractional_coords(kc + uf * (i + 1) * float(argv[4])))
 
-        print("\n -> k-point grid generated!")
+    with open('kTest.txt', 'w') as f:
+        f.write("Step size = {0:0.3f} 2pi/A\n{1:d}\nrec\n".format(
+            float(argv[4]), len(k)))
+        for i in k:
+            f.write(" {0:11.8f} {1:11.8f} {2:11.8f}  0.01\n".format(
+                i[0], i[1], i[2]))
+
+    print("\n -> k-point grid generated!")
 
 END
 
@@ -1190,7 +1308,7 @@ effM() { # FIX COMPATABILITY WITH ISPIN=1
     echo -n "Band index -> "
     read bn # get band index
     if [[ $bn =~ ^[0-9]+$ ]]; then
-        if (($bn <= $(grep -m 1 NBANDS bands.xml | getNumber))); then
+        if (($bn <= $(grep -m 1 NBANDS *.xml | getNumber))); then
             tail -n +8 EIGENVAL | grep " $bn " | rmSpace | cut -d ' ' -f 2,3 >eList
             duplicateLines eList
         else
@@ -1231,9 +1349,7 @@ effM() { # FIX COMPATABILITY WITH ISPIN=1
             fi
             echo -n "Stencil ( 3 | 5 ) -> "
             read st
-            if [ $st == 3 ] || [ $st == 5 ]; then
-                step=$(((st - 1) / 2))
-            else
+            if [ $st == 3 ] || [ $st == 5 ]; then step=$(((st - 1) / 2)); else
                 echo -e "\nStencil must be 3 or 5"
                 return
             fi
@@ -1258,51 +1374,63 @@ effM() { # FIX COMPATABILITY WITH ISPIN=1
 
     # convert kpoints to cartesian coordinates and calculate effective mass
     python3.7 - "${kpts[*]}" $s <<-END
-    from numpy import array,abs
+    
+    from numpy import array, abs
     from numpy.linalg import norm
     from sys import argv
     from pymatgen.core.structure import Structure as st
 
     rec = st.from_file('POSCAR').lattice.reciprocal_lattice
 
-    indices = [int(i)-1 for i in argv[1].split(' ')]
+    indices = [int(i) - 1 for i in argv[1].split(' ')]
 
-    kf = [] # fractional coordinates
-    with open('kList','r') as f:
-      for line in enumerate(f.readlines()):
-        if line[0] in indices:
-          kf.append(array([float(i) for i in line[1].split('\n')[0].split()[0:3]]))
+    kf = []  # fractional coordinates
+    with open('kList', 'r') as f:
+        for line in enumerate(f.readlines()):
+            if line[0] in indices:
+                kf.append(
+                    array([float(i) for i in line[1].split('\n')[0].split()[0:3]]))
 
-    k = [rec.get_cartesian_coords(i) for i in kf] # converted to cartesian coordinates
-    kn = [i/max(abs(i)) if norm(i) != 0 else i for i in k] # normalize
+    k = [rec.get_cartesian_coords(i)
+        for i in kf]  # converted to cartesian coordinates
+    kn = [i / max(abs(i)) if norm(i) != 0 else i for i in k]  # normalize
 
-    e = [] # energies in eV
-    with open('eList','r') as f:
-      for line in enumerate(f.readlines()):
-        if line[0] in indices:
-          e.append(float(line[1].split('\n')[0].split(' ')[int(argv[2])-1]))
+    e = []  # energies in eV
+    with open('eList', 'r') as f:
+        for line in enumerate(f.readlines()):
+            if line[0] in indices:
+                e.append(float(line[1].split('\n')[0].split(' ')[int(argv[2]) -
+                                                                1]))
 
     print("")
     print(e)
 
     if len(k) == 3:
-      M = 7.63050245928016 / ((e[0]-2.0*e[1]+e[2])/norm(k[2]-k[1])**2)
+        M = 7.63050245928016 / ((e[0] - 2.0 * e[1] + e[2]) / norm(k[2] - k[1])**2)
     else:
-      M = 7.63050245928016 / ((-e[0]+16.0*e[1]-30.0*e[2]+16.0*e[3]-e[4])/(12.0*norm(k[3]-k[2])**2))
+        M = 7.63050245928016 / (
+            (-e[0] + 16.0 * e[1] - 30.0 * e[2] + 16.0 * e[3] - e[4]) /
+            (12.0 * norm(k[3] - k[2])**2))
 
     print("")
-    for i, kpt in enumerate(zip(kf,kn)):
-        print("k ( frac | cart ) = [%7.4f %7.4f %7.4f ] | [%7.4f %7.4f %7.4f ] ; e = %9.6f"
-        % (kpt[0][0],kpt[0][1],kpt[0][2],kpt[1][0],kpt[1][1],kpt[1][2],e[i]))
+    for i, kpt in enumerate(zip(kf, kn)):
+        print(
+            "k ( frac | cart ) = [%7.4f %7.4f %7.4f ] | [%7.4f %7.4f %7.4f ] ; e = %9.6f"
+            % (kpt[0][0], kpt[0][1], kpt[0][2], kpt[1][0], kpt[1][1], kpt[1][2],
+            e[i]))
 
     print("")
-    index = int((len(k)+1)/2-1)
-    print("backward = [ {0:0.3f} eV ; {1:0.3f} 2pi/A ]".format(abs(e[index]-e[index-1]),norm(k[index]-k[index-1])))
-    print("forward  = [ {0:0.3f} eV ; {1:0.3f} 2pi/A ]".format(abs(e[index+1]-e[index]),norm(k[index+1]-k[index])))
+    index = int((len(k) + 1) / 2 - 1)
+    print("backward = [ {0:0.3f} eV ; {1:0.3f} 2pi/A ]".format(
+        abs(e[index] - e[index - 1]), norm(k[index] - k[index - 1])))
+    print("forward  = [ {0:0.3f} eV ; {1:0.3f} 2pi/A ]".format(
+        abs(e[index + 1] - e[index]), norm(k[index + 1] - k[index])))
 
     print("\nM_eff = %0.3f m_e\n" % M)
 
 END
+
+    #rm eList kList
 
 }
 
@@ -1713,48 +1841,62 @@ forces() {
     grep -o ' [TF] .*' POSCAR >temp2
     paste temp1 temp2 | rmSpace | sort -k$((ax + 1)) -n | cut -d ' ' -f 1- >temp3 # sorted by longest lattice parameter
 
-    python3.7 - $(getTag EDIFFG | cut -d '-' -f 2) <<-END
+    # TODO: allow for mixed T/F cases
+
+    forcesHeader() {
+
+        python3.7 <<-END
+
+        print(' ' + '-' * 64)
+        print('%6s %10s %10s %10s %10s %10s' % ('x', 'y', 'z', 'Fx', 'Fy', 'Fz'))
+        print(' ' + '-' * 64)
+
+END
+
+    }
+
+    forcesHeader
+
+    python3.7 - $(getTag EDIFFG | cut -d '-' -f 2) <<-END | sort -nr -k3
 
     from sys import argv
     from colorama import Fore
 
-    ### TODO: allow for mixed T/F cases
 
     def check(range):
-      for n in range:
-        if abs(float(args[n])) <= cutoff:
-          args.append(eval('Fore.GREEN + "1"'))
-        else:
-          args.append(eval('Fore.RED + "0"'))
-      args.append(eval('Fore.WHITE'))
+        for n in range:
+            if abs(float(args[n])) <= cutoff:
+                args.append(eval('Fore.GREEN + "1"'))
+            else:
+                args.append(eval('Fore.RED + "0"'))
+        args.append(eval('Fore.WHITE'))
+
 
     cutoff = float(argv[1])
 
-    print(' ' + '-' * 64)
-    print('%6s %10s %10s %10s %10s %10s' % ('x', 'y', 'z', 'Fx', 'Fy', 'Fz'))
-    print(' ' + '-' * 64)
+    with open('temp3', 'r') as f:
+        for line in f.readlines():
+            args = line.split()
+            l = len(args) - 3
+            if 'T' in args or l == 3:
+                args.append('--->')
+                check(range(3, 6))
 
-    with open('temp3','r') as f:
-      for line in f.readlines():
-        args = line.split()
-        l = len(args) - 3
-        if 'T' in args or l == 3:
-          args.append('--->')
-          check(range(3, 6))
-
-        vars = tuple([float(i) for i in args[:6]] + args[6:])
-        if len(args) == 11:
-          print('%10.6f %10.6f %10.6f %10.6f %10.6f %10.6f %s %s %s %s %s' % vars)
-        elif len(args) == 9:
-          print('%10.6f %10.6f %10.6f %10.6f %10.6f %10.6f  <%s %s %s>' % vars)
-        else:
-          print('%10.6f %10.6f %10.6f %10.6f %10.6f %10.6f  <%s %s %s> %s %s %s %s %s' % vars)
-
-    print(' ' + '-' * 64)
-    print('%6s %10s %10s %10s %10s %10s' % ('x', 'y', 'z', 'Fx', 'Fy', 'Fz'))
-    print(' ' + '-' * 64)
+            vars = tuple([float(i) for i in args[:6]] + args[6:])
+            if len(args) == 11:
+                print('%10.6f %10.6f %10.6f %10.6f %10.6f %10.6f %s %s %s %s %s' %
+                    vars)
+            elif len(args) == 9:
+                print('%10.6f %10.6f %10.6f %10.6f %10.6f %10.6f  <%s %s %s>' %
+                    vars)
+            else:
+                print(
+                    '%10.6f %10.6f %10.6f %10.6f %10.6f %10.6f  <%s %s %s> %s %s %s %s %s'
+                    % vars)
 
 END
+
+    forcesHeader
 
     rm temp[123]
 }
@@ -1836,42 +1978,42 @@ kPoints() { # set KPOINTS
 
             python3.7 - $1 "${a1[*]}" "${a2[*]}" "${a3[*]}" $odd <<-END
 
-          from sys import argv
-          import numpy as np
+            from sys import argv
+            import numpy as np
 
-          odd = argv[-1]
+            odd = argv[-1]
 
-          k1 = int(argv[1])
-          k1 = k1 + 1 if odd == 'True' and k1 % 2 == 0 else k1
+            k1 = int(argv[1])
+            k1 = k1 + 1 if odd == 'True' and k1 % 2 == 0 else k1
 
-          # define real lattice
-          a = [np.array([float(j) for j in i.split()]) for i in argv[2:5]]
-          realVecs = [np.linalg.norm(r) for r in a]
+            # define real lattice
+            a = [np.array([float(j) for j in i.split()]) for i in argv[2:5]]
+            realVecs = [np.linalg.norm(r) for r in a]
 
-          # define reciprocal lattice
-          b = [(np.dot(a[0], np.cross(a[1], a[2])))**-1 * np.cross(i, j) for i, j in [a[1:3], [a[2], a[0]], a[0:2]]]
-          recVecs = [np.linalg.norm(r) for r in b]
+            # define reciprocal lattice
+            b = [(np.dot(a[0], np.cross(a[1], a[2])))**-1 * np.cross(i, j) for i, j in [a[1:3], [a[2], a[0]], a[0:2]]]
+            recVecs = [np.linalg.norm(r) for r in b]
 
-          # define ratios with respect to shortest vector
-          longIndex = recVecs.index(max(recVecs))
-          r21 = recVecs[(longIndex + 1) % len(recVecs)] / recVecs[longIndex]
-          r31 = recVecs[(longIndex + 2) % len(recVecs)] / recVecs[longIndex]
+            # define ratios with respect to shortest vector
+            longIndex = recVecs.index(max(recVecs))
+            r21 = recVecs[(longIndex + 1) % len(recVecs)] / recVecs[longIndex]
+            r31 = recVecs[(longIndex + 2) % len(recVecs)] / recVecs[longIndex]
 
-          k2 = int(k1 * r21)
-          k3 = int(k1 * r31)
+            k2 = int(k1 * r21)
+            k3 = int(k1 * r31)
 
-          k2, k3 = [i + 1 if odd == 'True' and i % 2 == 0 else i for i in [k2, k3]]
+            k2, k3 = [i + 1 if odd == 'True' and i % 2 == 0 else i for i in [k2, k3]]
 
-          k = []
-          for i in range(3):
+            k = []
+            for i in range(3):
             if i == longIndex:
-              k.append(k1)
+                k.append(k1)
             elif i == (longIndex + 1) % len(recVecs):
-              k.append(k2)
+                k.append(k2)
             else:
-              k.append(k3)
+                k.append(k3)
 
-          print(k[0], k[1], k[2])
+            print(k[0], k[1], k[2])
 
 END
 
@@ -2084,8 +2226,9 @@ posMod() {
             head -7 POSCAR
             echo ""
         else
-            getFiles
-            getJob IN
+            # getFiles
+            # getJob IN
+            echo ""
         fi
     done
 }
