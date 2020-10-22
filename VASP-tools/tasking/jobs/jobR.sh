@@ -23,7 +23,7 @@ nsw=20
 ediff=4
 ediffg=01
 
-# setup 
+# setup
 
 disTag NELM
 enbTag 'NELMDL NELMIN'
@@ -35,9 +35,9 @@ setTag EDIFFG "-0.$ediffg"
 setTag LCHARG F
 kPoints $k1
 
-if (( ediff == 6 )); then setTag NELMIN 1; fi
+if ((ediff == 6)); then setTag NELMIN 1; fi
 
-if (( wave == 1 )); then 
+if ((wave == 1)); then
 	setTag LWAVE T
 	if [[ -s WAVECAR ]]; then
 		setTag ISTART 1
@@ -49,24 +49,25 @@ fi
 
 cp POSCAR tempPOS
 
-if (( eqVol == 0 )); then
+if ((eqVol == 0)); then
 	if [[ $(grep '; R' status) ]]; then
-		n=$(grep -o '; R.*' status | tail -1 | cut -d ' ' -f 3 | cut -d '(' -f 1); ((n++))
+		n=$(grep -o '; R.*' status | tail -1 | cut -d ' ' -f 3 | cut -d '(' -f 1)
+		((n++))
 	else
-		echo "" >> status
+		echo "" >>status
 		n=1
 	fi
 else
 	scalers=
-	s=-$(((cycles-1)/2))
-	echo -en "\nSearching for equilibrium volume..." >> status
-	echo -n '' > EV
+	s=-$(((cycles - 1) / 2))
+	echo -en "\nSearching for equilibrium volume..." >>status
+	echo -n '' >EV
 fi
 
 # begin relaxation
 
 for i in $(seq $cycles); do
-  
+
 	# start reading WAVECAR once available
 	# NELMDL is only necessary for a bad guess with no WAVECAR
 	if [[ -s WAVECAR ]]; then
@@ -74,50 +75,50 @@ for i in $(seq $cycles); do
 		disTag NELMDL
 		cp WAVECAR tempWave
 	fi
- 
-	(( eqVol == 1 )) && scaleLattice $s "$scalers"
- 
-	ibrun vasp_std > Vasp.out
 
-	# backup files for current run and recalculate k-point grid  
+	((eqVol == 1)) && scaleLattice $s "$scalers"
+
+	ibrun vasp_std >Vasp.out
+
+	# backup files for current run and recalculate k-point grid
 	cp CONTCAR POSCAR
-	backUp $(if (( eqVol == 0 )); then echo R; else echo V; fi) $i
+	backUp $(if ((eqVol == 0)); then echo R; else echo V; fi) $i
 	kPoints $k1
 
 	# adjust POTIM
-#  if (( ibrion == 2 )); then
-#    x=($(grep -o 'trialstep.*' Vasp.out | tail -1 | getNumber))
-#    s=$(echo "scale=5;${x[0]} * 10 ^ ${x[1]}" | bc)
-#    setTag POTIM $(echo "$(getTag POTIM) * $s" | bc | xargs printf %0.3f)
-#  fi
+	#  if (( ibrion == 2 )); then
+	#    x=($(grep -o 'trialstep.*' Vasp.out | tail -1 | getNumber))
+	#    s=$(echo "scale=5;${x[0]} * 10 ^ ${x[1]}" | bc)
+	#    setTag POTIM $(echo "$(getTag POTIM) * $s" | bc | xargs printf %0.3f)
+	#  fi
 
 	# determine convergence and write output
-  Istep=$(tail -1 OSZICAR | grep -o '[0-9][0-9]* F' | cut -d ' ' -f 1)
-	if (( eqVol == 0 )); then
-    getEnergy $Istep $n $i $isif $ibrion >> status
+	Istep=$(tail -1 OSZICAR | grep -o '[0-9][0-9]* F' | cut -d ' ' -f 1)
+	if ((eqVol == 0)); then
+		getEnergy $Istep $n $i $isif $ibrion >>status
 		if [[ $(grep 'reached required accuracy' Vasp.out) ]]; then
 			sed -i "$ s/$/ -> Done \!\!\!/" status
-			if (( $(grep E0 status | tail -1 | grep -o 1E... | cut -c 5) >= 6 )); then
-				realSpace >> status
+			if (($(grep E0 status | tail -1 | grep -o 1E... | cut -c 5) >= 6)); then
+				realSpace >>status
 				rm tempWave
 			fi
 			break
-	#	elif [[ $(grep "can't locate minimum" Vasp.out) ]]; then 
-	#		setTag IBRION 2
-	#		ibrion=2
+			#	elif [[ $(grep "can't locate minimum" Vasp.out) ]]; then
+			#		setTag IBRION 2
+			#		ibrion=2
 			# TODO - if delE in meV range (close to minimum)
 		fi
 	else
-		getEnergy $Istep $i $isif $ibrion >> EV
+		getEnergy $Istep $i $isif $ibrion >>EV
 		((s++))
 	fi
 done
 
-# final backup 
+# final backup
 
-if (( eqVol == 0 )); then
- 	cp status output/relax
- 	mkdir -p output/relax/trial_$n
+if ((eqVol == 0)); then
+	cp status output/relax
+	mkdir -p output/relax/trial_$n
 	mv output/relax/{1,2,3,4,5} output/relax/trial_$n 2>/dev/null
 else
 	cp EV output/relax/EV_data

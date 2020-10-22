@@ -14,6 +14,6 @@ source /work/01293/hudamn/Edan/genFunc
 setTag LWAVE F
 setTag LCHARG F
 
-ibrun vasp_std > Vasp.out
+ibrun vasp_std >Vasp.out
 
 setTag 'LWAVE LCHARG' 'F F'

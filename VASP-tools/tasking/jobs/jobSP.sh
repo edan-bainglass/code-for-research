@@ -24,7 +24,7 @@ if [[ -s CHGCAR ]]; then setTag ICHARG 1; elif [[ -s WAVECAR ]]; then setTag ICH
 
 if [[ $(getTag LOPTICS) == T ]]; then
   setTag NEDOS 2000
-	setTag ISMEAR -5
+  setTag ISMEAR -5
   oldBands=$(getTag NBANDS)
   setTag NBANDS $(echo "$oldBands * 3" | bc)
   folder=optics
@@ -33,18 +33,23 @@ elif [[ $(getTag LHFCALC) == T ]]; then
 elif [[ $(getTag LVHAR) == T ]]; then
   folder=lv/har
 elif [[ $(getTag LVTOT) == T ]]; then
-	folder=lv/tot
+  folder=lv/tot
 else
-	folder=totE
+  folder=totE
 fi
 
-ibrun vasp_std > Vasp.out
+ibrun vasp_std >Vasp.out
 
 # output
 
-getEnergy >> status; backUp SP $folder; cp KPOINTS SCF_KPOINTS
+getEnergy >>status
+backUp SP $folder
+cp KPOINTS SCF_KPOINTS
 
-if [[ $(getTag LAECHG) == T ]]; then calcBader > baderLog; rm AECCAR*; fi
+if [[ $(getTag LAECHG) == T ]]; then
+  calcBader >baderLog
+  rm AECCAR*
+fi
 if [[ $(occCheck 1) == '' ]]; then msg='Final energy value !!!'; else msg='Check occupancies !!!'; fi
 sed -i "$ s/$/ -> $msg/" status
 if [[ $(getTag LOPTICS) == T ]]; then setTag NBANDS $oldBands; fi
