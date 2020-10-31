@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 
 from widgets import Slider, PremiumCheckButtons
 
-loc = '../CPL Energies/'  # location of energies
+loc = 'CPL Energies/'  # location of energies
 
 Cu, Bi, W, O = symbols(['Cu', 'Bi', 'W', 'O'])
 free, x, y, z = Cu, Bi, W, O
@@ -330,7 +330,7 @@ def genDefect(event):
                 })
             return val
 
-        figDef = plt.figure(figsize=(10, 6))
+        figDef = plt.figure(figsize=(12, 8))
         gs = figDef.add_gridspec(2, 3)
         axDef = plt.subplot(gs[:, :2])
         axZoom = plt.subplot(gs[0, 2])

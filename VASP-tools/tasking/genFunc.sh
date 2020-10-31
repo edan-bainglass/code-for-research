@@ -37,6 +37,7 @@ interfaceSeparationMod() {
 END
 
 }
+
 scaleLattice() {
 
     python3.7 - $* <<-END
