@@ -1,10 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Sat Aug 18 09:42:39 2018
-
-@author: Edan
-"""
-
 import re
 import inspect
 
@@ -36,7 +29,7 @@ def draw_sphere(ax, xs, ys, zs, c, r):
     y = r * np.outer(sin(phi), sin(theta)) + ys
     z = r * np.outer(np.ones(np.size(phi)), cos(theta)) + zs
 
-    #    ax.plot_surface(x, y, z, rstride=1, cstride=1, color=c, antialiased=False)
+    # ax.plot_surface(x, y, z, rstride=1, cstride=1, color=c, antialiased=False)
     ax.plot_wireframe(x, y, z, rstride=1, cstride=1, color=c)
 
 
@@ -153,7 +146,7 @@ def draw_lattice(lat,
                   arrow_length_ratio=0.1,
                   pivot='middle')  # draw polarization vector
 
-    ax.set_aspect(aspect)  # scale plot
+    ax.set_aspect('auto')  # scale plot
     ax.view_init(tilt, turn)  # set viewing direction
     if title: ax.set_title(title, {'fontsize': 20})
 
@@ -336,7 +329,7 @@ rc('font', **font)
 n_phi = 20
 n_theta = 20
 
-loc = r'E:\TACC & HPC Backup\Stampede2\SbTaO\Orthorhombic'
+loc = r'tests/SbTaO4'
 
 cell_type = 'super'
 
@@ -367,31 +360,39 @@ draw_lattice(init_cations, title='Initial Lattice', P=init_P, aspect=aspect)
 # define equilibriation and polarization sweeps
 equiSwp = 1
 polSwp = 2
-dAng = np.radians(0.5)  # converts perturbation cutoff angle to radians
+
+dAng = np.radians(0.5)  # perturbation cutoff angle
+
 # define temperature (broken into several ranges for resolution)
 TR1 = np.linspace(100, 1000, 10)
 TR2 = np.linspace(1025, 2000, 40)
 TR3 = np.linspace(2200, 4000, 10)
 T = np.concatenate((TR1, TR2, TR3))
 # T = TR1 # tester
+
 # define cell register to store final cell per temperature
 avgCell = []
-# define polarization register to stor average polarizations per temperature
+
+# define polarization register to store average polarizations per temperature
 avgP = []
 
 # sweep through the lattice for each temperature step
 for t in T:
     Ising(t, cations)
 
-# draw_combo()
+# draw_combo()  # start and end polarization states
 
 # plot statistical results
 # plt.close()
 # P = [norm(i) * 1e6 for i in avgP]
-# fig = plt.figure(figsize=(10,7))
+# fig = plt.figure(figsize=(10, 7))
 # plt.title("Ferro-Electric Ising Model", fontsize=30, pad=20)
-# plt.scatter(T,P,color='IndianRed',marker='.')
+# plt.scatter(T, P, color='IndianRed', marker='.')
 # plt.xlabel("Temperature (K)", fontsize=20, labelpad=20)
-# plt.ylabel(u"Polarization ($\mathrm{\mu D\cdot\AA^{-3}}$)", fontsize=20, labelpad=20)
-# plt.axis([0,max(T),0,max(P)],'tight')
+# plt.ylabel(u"Polarization ($\mathrm{\mu D\cdot\AA^{-3}}$)",
+#            fontsize=20,
+#            labelpad=20)
+# plt.axis([0, max(T), 0, max(P)], 'tight')
 # plt.tick_params(axis='both', labelsize=10)
+
+plt.show()

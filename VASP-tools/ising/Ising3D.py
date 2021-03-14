@@ -1,9 +1,3 @@
-"""
-Created on Sat Aug 18 09:42:39 2018
-
-@author: Edan
-"""
-
 import numpy as np
 from numpy.random import random, randint
 
