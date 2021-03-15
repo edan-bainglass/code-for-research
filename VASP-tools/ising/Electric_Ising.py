@@ -1,4 +1,3 @@
-import re
 import inspect
 from typing import Iterable, List, Tuple
 
@@ -7,9 +6,7 @@ from numpy import exp, dot, ndarray, sin, cos, arccos, arctan2
 from numpy.random import random
 from numpy.linalg import norm
 
-from pymatgen.io.vasp import Potcar
 from pymatgen.core.structure import Structure
-import pymatgen.analysis.ferroelectricity.polarization as ferro
 
 import matplotlib.pyplot as plt
 from matplotlib import rc
@@ -36,6 +33,10 @@ class System:
         self.init_cations = self.cations.copy()
         self.init_polar = sum(self.init_cations[:, 1]) / self.get_volume()
 
+        # average registers
+        self.avg_cell = []
+        self.avg_p = []
+
     def add_charges(self, loc: str) -> None:
         """
         Extract Bader charges from Bader analysis output.
@@ -44,8 +45,7 @@ class System:
         valence charge = pseudopotential charge - Bader analysis charge
         """
 
-        pot = Potcar.from_file(loc + '/POTCAR')
-        z = ferro.zval_dict_from_potcar(pot)  # pseudopotential charges
+        z = {'Sb': 5.0, 'Ta': 11.0, 'O': 6.0}  # pseudopotential charges
         bader_charges = []
         valence_charges = []
         with open(loc + '/ACF.dat') as bader_file:
@@ -128,15 +128,118 @@ class System:
         oxy = self.struct.indices_from_symbol('O')
         dipoles = calc_dipoles()
 
-        # combine coordinates, labels, and dipoles
-        lat = np.array([i for p in zip(coords, dipoles, labels)
-                        for i in p]).reshape(-1, 3)
+        # combine coordinates, dipoles, and labels for each site
+        lat = np.array([(c, d, l) for c, d, l in zip(coords, dipoles, labels)],
+                       dtype=object)
 
-        # split cations and oxygens
+        # split cations and anions
         cations = lat[:min(oxy)]
-        oxygens = lat[min(oxy):]
+        anions = lat[min(oxy):]
 
-        return (cations, oxygens)
+        return (cations, anions)
+
+
+class ElectricIsing:
+    """An Ising model simulation object."""
+    def __init__(self, system: System) -> None:
+
+        self.system = system
+        self.lat = system.cations
+
+    def run_simulation(self, temperatures: List[int], eql_swps: int,
+                       pol_swps: int, d_ang: int) -> None:
+        """
+        Executes Ising algorithm to obtain average structure polarization.
+        """
+        for t in temperatures:
+
+            # thermalize lattice
+            for _ in range(eql_swps):
+                self.sweep(t, d_ang)
+
+            # calculate polarization
+            P = np.zeros(3)
+            dips = 0.0
+            for n in range(pol_swps):
+                self.sweep(t, d_ang)
+                P += sum(self.lat[:, 1])
+                dips += self.lat[:, 1]
+
+            # normalize
+            self.system.avg_p.append(P / pol_swps / self.system.get_volume())
+            dips = dips / pol_swps
+
+            # save dipole moment configuration at current temperature
+            cell = self.lat.copy()
+            for i in range(len(self.lat)):
+                cell[i][1] = dips[i]
+            self.system.avg_cell.append(cell)
+
+    def sweep(self, t: int, d_ang: float = 0.5) -> None:
+        """
+        Sweep through lattice, perturbing dipole moments and computing the
+        energetic cost. If favorable, new dipole moment is retained. Total
+        dipole-dipole interaction potential energy and polarizations are
+        obtained in the process.
+
+        Units:
+
+        [r] = Å
+        [p] = eÅ, or Debye
+        [E] = eV
+
+        E = 1/4πε0 * 1/rn^3 * [p1 • p2 - 3(p1 • rh)(p2 • rh)]
+        """
+
+        #######################################################################
+        # Helper functions
+        #######################################################################
+
+        def perturb(p1: ndarray) -> ndarray:
+            """Return the perturbed dipole moment."""
+            p = p1.copy()
+            theta = arccos(p[2] / norm(p)) + d_ang * (2 * random() - 1)
+            phi = arctan2(p[1], p[0]) + d_ang * (2 * random() - 1)
+            p[0] = norm(p1) * sin(theta) * cos(phi)
+            p[1] = norm(p1) * sin(theta) * sin(phi)
+            p[2] = norm(p1) * cos(theta)
+
+            return p
+
+        def calcE(p: ndarray) -> float:
+            """Calculate dipole-dipole interaction potential."""
+            E = 0.0
+            for j in range(len(self.lat)):
+                if j != i:
+                    r2, p2 = self.lat[j][0], self.lat[j][1]
+                    r = r2 - r1
+                    rn = norm(r)
+                    rh = r / rn
+                    E += 14.4 / rn**3 * (dot(p, p2) -
+                                         3 * dot(p, rh) * dot(p2, rh))
+            return E
+
+        #######################################################################
+
+        # perform sweep
+        for i in range(len(self.lat)):
+
+            r1, p1 = self.lat[i][:2]
+            e1 = calcE(p1)
+            p1p = perturb(p1)
+            e2 = calcE(p1p)
+            dE = round(e2 - e1, 10)
+
+            # if perturbation is energetically favorable
+            # or thermally accessible...
+            if dE < 0 or random() <= exp(-dE / (8.617e-5 * t)):
+                self.lat[i][1] = p1p  # keep perturbation
+
+
+class Plotter:
+    """A plotting tool for an Electric Ising model."""
+    def __init__(self, system: System) -> None:
+        self.system: System = system
 
     def draw_lattice(self,
                      fig_size: Tuple[int] = (5, 5),
@@ -145,10 +248,10 @@ class System:
                      turn=0,
                      oxy=False,
                      title=None,
-                     labels=False):
+                     labels=False) -> None:
         """Draws lattice with superimposed dipole moments."""
 
-        A, B, C = self.struct.lattice.abc
+        A, B, C = self.system.struct.lattice.abc
 
         # if inspect.stack()[1][3] == '<module>': plt.close()
 
@@ -166,14 +269,15 @@ class System:
 
         # add oxygens if requested
         if oxy:
-            lat = np.array(list(self.cations) + list(self.anions))
+            lat = np.array(
+                list(self.system.cations) + list(self.system.anions))
         else:
-            lat = self.cations
+            lat = self.system.cations
 
         for i in enumerate(lat):
-            if i[0] in self.struct.indices_from_symbol('Sb'):
+            if i[0] in self.system.struct.indices_from_symbol('Sb'):
                 c, r = 'sandybrown', .4
-            elif i[0] in self.struct.indices_from_symbol('Ta'):
+            elif i[0] in self.system.struct.indices_from_symbol('Ta'):
                 c, r = 'darkkhaki', .6
             else:
                 c, r = 'darkred', .15
@@ -186,7 +290,7 @@ class System:
                 ax.text(x + .25, y + .25, z + .25, i[1][2],
                         fontsize=10)  # add labels
 
-            if i[0] not in self.struct.indices_from_symbol('O'):
+            if i[0] not in self.system.struct.indices_from_symbol('O'):
                 u = i[1][1][0]
                 v = i[1][1][1]
                 w = i[1][1][2]
@@ -203,8 +307,8 @@ class System:
                           arrow_length_ratio=0.1,
                           pivot='middle')  # draw dipole moment
 
-        if self.init_polar.any():
-            P = self.init_polar / norm(self.init_polar)
+        if self.system.init_polar.any():
+            P = self.system.init_polar / norm(self.system.init_polar)
 
             # draw polarization vector
             ax.quiver(A / 2,
@@ -222,26 +326,7 @@ class System:
         ax.view_init(tilt, turn)  # set viewing direction
         if title: ax.set_title(title, {'fontsize': 20})
 
-    # def draw_combo(self, s=None, tilt=0, turn=0, oxy=False):
-    #     """Plot initial vs. selected lattice."""
-
-    #     if s is None:
-    #         t = T[-1]
-    #         lat = cations
-    #         P = avgP[-1]
-    #     else:
-    #         t = T[s]
-    #         lat = avgCell[s]
-    #         P = avgP[s]
-
-    #     plt.close()
-    #     fig = plt.figure(figsize=(10, 10))
-    #     ax0 = fig.add_subplot(121, projection='3d', title='Initial Lattice')
-    #     self.draw_lattice(init_cations, init_P, ax0, tilt, turn, oxy)
-    #     ax1 = fig.add_subplot(122, projection='3d', title=f'T = {t} K')
-    #     self.draw_lattice(lat, P, ax1, tilt, turn, oxy)
-
-    def plot_cell(self, ax, bounds):
+    def plot_cell(self, ax, bounds) -> None:
         """Draw cell boundaries."""
 
         bounds_array = [np.array(list(i)) for i in bounds]
@@ -273,7 +358,7 @@ class System:
 
         ax.add_collection3d(faces)
 
-    def draw_sphere(self, ax, xs, ys, zs, c, r):
+    def draw_sphere(self, ax, xs, ys, zs, c, r) -> None:
         """Draw spheres on atomic sites."""
 
         phi = np.linspace(0, 2 * np.pi, n_phi)
@@ -286,95 +371,20 @@ class System:
         # ax.plot_surface(x, y, z, rstride=1, cstride=1, color=c, antialiased=False)
         ax.plot_wireframe(x, y, z, rstride=1, cstride=1, color=c)
 
-
-class ElectricIsing:
-    """An Ising model simulation object."""
-    def __init__(self, system: System) -> None:
-
-        self.system = system
-        self.lat = system.cations
-
-        # average registers
-        self.avg_cell = []
-        self.avg_p = []
-
-    def run_simulation(self, temperatures: List[int], eql_swps: int,
-                       pol_swps: int, d_ang: int) -> None:
-        """
-        Executes Ising algorithm to obtain average structure polarization.
-        """
-        for t in temperatures:
-
-            # thermalize lattice
-            for _ in range(eql_swps):
-                self.sweep(t, d_ang)
-
-            # calculate polarization
-            P = np.zeros(3)
-            dips = 0.0
-            for n in range(pol_swps):
-                self.sweep(t, d_ang)
-                P += sum(self.lat[:, 1])
-                dips += self.lat[:, 1]
-
-            # normalize
-            self.avg_p.append(P / pol_swps / self.system.get_volume())
-            dips = dips / pol_swps
-
-            # save dipole moment configuration at current temperature
-            cell = self.lat.copy()
-            for i in range(len(self.lat)):
-                cell[i][1] = dips[i]
-            self.avg_cell.append(cell)
-
-    def sweep(self, t: int, d_ang: float = 0.5) -> None:
-        """
-        Sweep through lattice, perturbing dipole moments and computing the
-        energetic cost. If favorable, new dipole moment is retained. Total
-        dipole-dipole interaction potential energy and polarizations are
-        obtained in the process.
-
-        Units:
-
-        [r] = Å
-        [p] = eÅ, or Debye
-        [E] = eV
-        """
-        def perturb():
-            """Perturb the dipole moment."""
-            a = p1.copy()
-            theta = arccos(p1[2] / norm(p1)) + d_ang * (2 * random() - 1)
-            phi = arctan2(p1[1], p1[0]) + d_ang * (2 * random() - 1)
-            p1[0] = norm(a) * sin(theta) * cos(phi)
-            p1[1] = norm(a) * sin(theta) * sin(phi)
-            p1[2] = norm(a) * cos(theta)
-
-        def calcE():
-            """Calculate dipole-dipole interaction potential."""
-            E = 0.0
-            for j in range(len(self.lat)):
-                if j != i:
-                    r2, p2 = self.lat[j][0], self.lat[j][1]
-                    r = r2 - r1
-                    rn = norm(r)
-                    rh = r / rn
-                    E += 14.4 / rn**3 * (dot(p1, p2) -
-                                         3 * dot(p1, rh) * dot(p2, rh))
-            return E
-
-        # perform sweep
-        for i in range(len(self.lat)):
-            r1, p1 = self.lat[i][0], self.lat[i][1].copy()
-            e1 = calcE()
-            perturb()
-            e2 = calcE()
-            eDif = round(e2 - e1, 10)
-            if eDif < 0:
-                self.lat[i][1] = p1
-            elif random() <= exp(-eDif / (8.617e-5 * t)):
-                self.lat[i][1] = p1
-            else:
-                pass
+    def plot_stats(self, temperatures: List[int], figsize=(8, 6)) -> None:
+        """Plot statistical results."""
+        P = [norm(i) * 1e6 for i in self.system.avg_p]
+        plt.figure(figsize=figsize)
+        plt.title("Ferro-Electric Ising Model", fontsize=30, pad=20)
+        plt.scatter(temperatures, P, color='IndianRed', marker='.')
+        plt.xlabel("Temperature (K)", fontsize=20, labelpad=20)
+        plt.ylabel(r"Polarization ($\mathrm{\mu D\cdot\AA^{-3}}$)",
+                   fontsize=20,
+                   labelpad=20)
+        plt.xlim(0, max(temperatures))
+        plt.ylim(min(P), max(P))
+        plt.tick_params(axis='both', labelsize=10)
+        plt.tight_layout()
 
 
 # =============================================================================
@@ -394,10 +404,10 @@ n_theta = 15
 loc = "tests/SbTaO4"
 
 system = System(loc, supercell_dim=[2, 2, 1])
-system.draw_lattice(title='Initial Lattice')
+plotter = Plotter(system)
+plotter.draw_lattice(title='Initial Lattice')
 
 # define an Ising Simulator
-
 ising = ElectricIsing(system)
 
 # define temperature (broken into several ranges for resolution)
@@ -409,23 +419,10 @@ temperatures = np.concatenate((TR1, TR2, TR3))
 
 # run simulation
 delta_angle = np.radians(0.5)  # perturbation cutoff angle
-ising.run_simulation(temperatures, 1, 2, delta_angle)
-system.draw_lattice(title='Final Lattice')
+ising.run_simulation(temperatures, 1, 1, delta_angle)
+plotter.draw_lattice(title='Final Lattice')
 
-# # draw_combo()  # start and end polarization states
-
-# # plot statistical results
-
-# # plt.close()
-# # P = [norm(i) * 1e6 for i in avgP]
-# # fig = plt.figure(figsize=(10, 7))
-# # plt.title("Ferro-Electric Ising Model", fontsize=30, pad=20)
-# # plt.scatter(T, P, color='IndianRed', marker='.')
-# # plt.xlabel("Temperature (K)", fontsize=20, labelpad=20)
-# # plt.ylabel(u"Polarization ($\mathrm{\mu D\cdot\AA^{-3}}$)",
-# #            fontsize=20,
-# #            labelpad=20)
-# # plt.axis([0, max(T), 0, max(P)], 'tight')
-# # plt.tick_params(axis='both', labelsize=10)
+# plot statistical results
+plotter.plot_stats(temperatures)
 
 plt.show()
