@@ -361,8 +361,8 @@ class Plotter:
     def draw_sphere(self, ax, xs, ys, zs, c, r) -> None:
         """Draw spheres on atomic sites."""
 
-        phi = np.linspace(0, 2 * np.pi, n_phi)
-        theta = np.linspace(0, np.pi, n_theta)
+        phi = np.linspace(0, 2 * np.pi, 15)
+        theta = np.linspace(0, np.pi, 15)
 
         x = r * np.outer(cos(phi), sin(theta)) + xs
         y = r * np.outer(sin(phi), sin(theta)) + ys
@@ -398,31 +398,29 @@ rc('font', **font)
 #                                Main Program
 # =============================================================================
 
-n_phi = 15
-n_theta = 15
+if __name__ == '__main__':
+    loc = "tests/SbTaO4"
 
-loc = "tests/SbTaO4"
+    system = System(loc, supercell_dim=[2, 2, 1])
+    plotter = Plotter(system)
+    plotter.draw_lattice(title='Initial Lattice')
 
-system = System(loc, supercell_dim=[2, 2, 1])
-plotter = Plotter(system)
-plotter.draw_lattice(title='Initial Lattice')
+    # define an Ising Simulator
+    ising = ElectricIsing(system)
 
-# define an Ising Simulator
-ising = ElectricIsing(system)
+    # define temperature (broken into several ranges for resolution)
+    TR1 = np.linspace(100, 1000, 10)
+    TR2 = np.linspace(1025, 2000, 40)
+    TR3 = np.linspace(2200, 4000, 10)
+    temperatures = np.concatenate((TR1, TR2, TR3))
+    # T = TR1 # tester
 
-# define temperature (broken into several ranges for resolution)
-TR1 = np.linspace(100, 1000, 10)
-TR2 = np.linspace(1025, 2000, 40)
-TR3 = np.linspace(2200, 4000, 10)
-temperatures = np.concatenate((TR1, TR2, TR3))
-# T = TR1 # tester
+    # run simulation
+    delta_angle = np.radians(0.5)  # perturbation cutoff angle
+    ising.run_simulation(temperatures, 1, 1, delta_angle)
+    plotter.draw_lattice(title='Final Lattice')
 
-# run simulation
-delta_angle = np.radians(0.5)  # perturbation cutoff angle
-ising.run_simulation(temperatures, 1, 1, delta_angle)
-plotter.draw_lattice(title='Final Lattice')
+    # plot statistical results
+    plotter.plot_stats(temperatures)
 
-# plot statistical results
-plotter.plot_stats(temperatures)
-
-plt.show()
+    plt.show()
