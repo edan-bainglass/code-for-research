@@ -14,16 +14,20 @@ from sympy.solvers import solve
 from shapely.geometry import LineString, Polygon, Point
 from descartes import PolygonPatch
 
+import matplotlib
 import matplotlib.pyplot as plt
 
 from widgets import Slider, PremiumCheckButtons
 
-loc = 'CPL Energies/'  # location of energies
+matplotlib.use('Qt5Agg')
 
+loc = 'tests/CBTO/'  # location of energies
+
+# define calculation parameters
 Cu, Bi, W, O = symbols(['Cu', 'Bi', 'W', 'O'])
 free, x, y, z = Cu, Bi, W, O
 
-# Globals
+# Global
 SP = None
 
 
@@ -50,6 +54,7 @@ def getEnthalpy(_dict, f, m=None):
         frac.update(
             (k, v - 1) if k == s[1] else (k, v) for k, v in frac.items())
     _dict[f]['fracs'] = frac
+
     # calculate enthalpy
     return _dict[f]['E'] - sum(_dict[f]['fracs'][i] * bulks[i]
                                for i in _dict[f]['fracs'])
@@ -190,8 +195,12 @@ def draw_CPL(c):
                 B = (l, minY - 1)
                 seg = LineString([A, B])
                 pts = seg.intersection(primPoly.boundary)
-                t = np.array([p[0][0] for p in [p.coords.xy for p in pts]])
-                v = np.array([p[1][0] for p in [p.coords.xy for p in pts]])
+                if isinstance(pts, LineString):
+                    t = [minX, minX]
+                    v = [0, 0]
+                else:
+                    t = np.array([p[0][0] for p in [p.coords.xy for p in pts]])
+                    v = np.array([p[1][0] for p in [p.coords.xy for p in pts]])
                 if str(">") in s:
                     xVal = 1
                 else:
@@ -204,8 +213,12 @@ def draw_CPL(c):
                 B = (1000, line(1000))
                 seg = LineString([A, B])
                 pts = seg.intersection(primPoly.boundary)
-                t = np.array([p[0][0] for p in [p.coords.xy for p in pts]])
-                v = np.array([p[1][0] for p in [p.coords.xy for p in pts]])
+                if isinstance(pts, LineString):
+                    t = [minX, 0]
+                    v = [0, minY]
+                else:
+                    t = np.array([p[0][0] for p in [p.coords.xy for p in pts]])
+                    v = np.array([p[1][0] for p in [p.coords.xy for p in pts]])
                 if not str(x) in s:  # horizontal
                     if str(">") in s:
                         poly_x = np.array([A[0], A[0], B[0], B[0]])
