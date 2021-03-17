@@ -1,4 +1,4 @@
-# Ising-model based electric polarization simulator
+# Electric Ising Model
 
 - A simulation of electric polarization in bulk material using a modified 3D Ising model
 
