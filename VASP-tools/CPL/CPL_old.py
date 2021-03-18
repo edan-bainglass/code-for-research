@@ -17,7 +17,7 @@ from descartes import PolygonPatch
 import matplotlib
 import matplotlib.pyplot as plt
 
-from widgets import Slider, PremiumCheckButtons
+from widgets_old import Slider, PremiumCheckButtons
 
 matplotlib.use('Qt5Agg')
 

@@ -7,9 +7,9 @@
 - Electric_Ising.py
 - A test is provided for SbTaO4
 
-  - See Journal ofThe Electrochemical Society, 166 (5) H3195-H3201 (2019); https://iopscience.iop.org/article/10.1149/2.0281905jes
+  - J. Electrochem. Soc, 166 (5) H3195-H3201 (2019); https://iopscience.iop.org/article/10.1149/2.0281905jes
 
-- See "Main Program" section of the code for an example run
+- The 'Main Program' section of the code has been added to a Jupyter Notebook for testing
 
 ## Note
 
