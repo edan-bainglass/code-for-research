@@ -13,4 +13,4 @@
 
 ## Note
 
-- The program is currently incomplete. The mechanics are in place, but the full consideration of contributing factors is not yet flushed out in the code. This is an ongoing task.
+- The program is currently incomplete. The mechanics are in place, but the full consideration of contributing factors is not yet fleshed out in the code. This is an ongoing task.
